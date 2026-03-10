@@ -15,6 +15,7 @@ const openai = new OpenAI({
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function runAll() {
+  // 注意：前端页面 industries 数组也要同步改为 "人工智能"
   const industries = ["贵金属", "人工智能", "电力"];
   
   for (const industry of industries) {
@@ -22,82 +23,92 @@ async function runAll() {
 
     try {
       // ---------------------------------------------------------
-      // 1. 双引擎搜索：强制区分 24H 内外与信息源类型
+      // 1. 双引擎搜索：物理隔离 24H 动态与宏观趋势
       // ---------------------------------------------------------
-      
       console.log(`⏳ 正在抓取 [24H最新动态] (侧重社媒与快讯)...`);
       const search24h = await tvly.search(`${industry} 过去24小时 最新突发新闻 社交媒体热议 Twitter 核心动态`, {
         searchDepth: "advanced",
         includeRawContent: true,
         maxResults: 3
       });
-      await sleep(1000); // 稍微停顿，防止 Tavily 频率限制
+      await sleep(1500); // 避开频率限制
 
       console.log(`⏳ 正在抓取 [行业趋势报告] (侧重深度分析)...`);
       const searchTrends = await tvly.search(`${industry} 近期权威行业深度报告 趋势分析 咨询公司`, {
         searchDepth: "advanced",
         includeRawContent: true,
-        maxResults: 2 // 篇幅不需要太大，抓 2 篇高质量的即可
+        maxResults: 2
       });
 
       // ---------------------------------------------------------
-      // 2. 数据防崩溃截断处理
+      // 2. 数据处理与截断 (放宽至 20000 字以适应 Claude)
       // ---------------------------------------------------------
       let data24h = JSON.stringify(search24h.results);
       let dataTrends = JSON.stringify(searchTrends.results);
       
-      const MAX_LEN_24H = 12000;  // 给最新动态分配更多字符额度
-      const MAX_LEN_TRENDS = 8000; // 趋势分析分配较少额度
-
-      if (data24h.length > MAX_LEN_24H) data24h = data24h.substring(0, MAX_LEN_24H) + '...[截断]';
-      if (dataTrends.length > MAX_LEN_TRENDS) dataTrends = dataTrends.substring(0, MAX_LEN_TRENDS) + '...[截断]';
+      const MAX_TOTAL_LEN = 20000; 
+      if (data24h.length > 12000) data24h = data24h.substring(0, 12000) + '...[截断]';
+      if (dataTrends.length > 8000) dataTrends = dataTrends.substring(0, 8000) + '...[截断]';
 
       // ---------------------------------------------------------
-      // 3. AI 深度分析 (全新优化的 System Prompt)
+      // 3. AI 深度分析 (包含强效 Prompt 约束)
       // ---------------------------------------------------------
-      console.log(`🧠 正在进行 AI 深度交叉分析...`);
+      console.log(`🧠 正在生成分析报告 (使用 Claude 3.5 Sonnet)...`);
       const response = await openai.chat.completions.create({
-        model: "anthropic/claude-3.5-sonnet", // 换成官方满血版 Claude
+        model: "anthropic/claude-3.5-sonnet", 
         messages: [{
           role: "system",
-          content: `你是一位顶级的行业分析师。你的任务是基于我提供的两组不同时间维度的数据（【24小时内最新动态】和【近期行业趋势】），输出一份极具“新鲜度”和“深度”的 Markdown 行业情报。
+          content: `你是一位冷酷、专业的行业分析师。请输出一份 Markdown 行业情报。
 
-必须严格按照以下结构输出：
+⚠️ **输出准则（核心约束）**：
+1. **禁止寒暄**：禁止输出任何引导语、开场白（如“基于信息如下...”）或结束语。
+2. **标题对齐**：必须严格使用二级标题 "## "，严禁使用 "# " 或 "### "。
+3. **内容纯净**：首行必须直接以 "## 一、 ⚡ 24H 最新动态（核心重点）" 开始。
+4. **视觉风格**：用 Emoji 增强模块化，逻辑严密。
+
+必须严格遵守以下结构：
 
 ## 一、 ⚡ 24H 最新动态（核心重点）
-基于【24小时内最新动态】数据，提炼出 3-5 条最新突发事件、社媒爆料或市场异动。
-要求：极具时效性，用一句话总结现象，并紧跟一句加粗的“本质影响”分析。
+基于数据提炼 3-5 条最新突发。每条总结后紧跟一句 **本质影响** 分析。
 
 ## 二、 📈 行业趋势与关键变量
-基于【近期行业趋势】数据，提炼该行业近期的宏观演变逻辑或关键数据变量。
-要求：篇幅精简，切中要害。必须包含一个 Markdown 表格（| 变量/趋势名称 | 当前状态 | 长期影响 |）。
+提炼宏观逻辑。必须包含表格：| 变量/趋势名称 | 当前状态 | 长期影响 |。
 
 ## 三、 🎯 明日推演
-结合以上短期和长期信息，给出客观的短期趋势推演和风险提示。
+给出客观的趋势预测和风险提示。
 
 ## 四、 🔗 信息来源
-提取分析中引用到的关键出处（包含24小时内和趋势报告的URL）。
-必须严格使用提供的 JSON 数据中的 url 字段，以 Markdown 列表和超链接的形式输出，如：
-* [文章/报告标题](具体的URL)
-
-语言要求：客观、锐利、有数据支撑。
-注意：直接输出内容，绝不要在最外层包裹 \`\`\`markdown 代码块标志！`
+严格提取 URL：* [标题](URL)。`
         }, {
           role: "user",
-          content: `这是关于 ${industry} 的两组原始信息：\n\n【24小时内最新动态】：${data24h}\n\n【近期行业趋势】：${dataTrends}`
+          content: `【24小时内最新动态】：${data24h}\n\n【近期行业趋势】：${dataTrends}`
         }]
       });
 
       if (!response.choices || response.choices.length === 0) {
-        console.error(`❌ API 未返回正常内容：`, JSON.stringify(response));
+        console.error(`❌ API 未返回内容`);
         continue;
       }
 
-      let content = response.choices[0].message.content;
-      content = content.replace(/^```markdown\s*/i, '').replace(/```\s*$/i, '');
+      // ---------------------------------------------------------
+      // 4. 后处理：物理剔除废话与标题校准
+      // ---------------------------------------------------------
+      let content = response.choices[0].message.content.trim();
+
+      // 自动切除开头可能出现的客套话，定位到首个 ## 
+      const firstHeadingIndex = content.indexOf('## 一、');
+      if (firstHeadingIndex !== -1) {
+        content = content.substring(firstHeadingIndex);
+      }
+
+      // 强制统一标题层级为 ##
+      content = content.replace(/^(#+)\s*(一、|二、|三、|四、)/gm, '## $2');
+
+      // 剔除代码块外壳
+      content = content.replace(/^```markdown\s*/i, '').replace(/```\s*$/i, '').trim();
 
       // ---------------------------------------------------------
-      // 4. 保存文件与自动清理
+      // 5. 保存文件与清理 (保留最近 7 天)
       // ---------------------------------------------------------
       const dir = `./content/${industry}`;
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -105,12 +116,13 @@ async function runAll() {
       const date = new Date().toISOString().split('T')[0];
       const filePath = `${dir}/${date}.md`;
       fs.writeFileSync(filePath, content);
-      console.log(`✅ ${industry} 报告已保存至：${filePath}`);
+      console.log(`✅ ${industry} 报告保存成功`);
 
       const files = fs.readdirSync(dir).filter(f => f.endsWith('.md')).sort().reverse();
       if (files.length > 7) {
         for (let i = 7; i < files.length; i++) {
           fs.unlinkSync(path.join(dir, files[i]));
+          console.log(`🧹 已清理旧文件: ${files[i]}`);
         }
       }
 
@@ -118,10 +130,10 @@ async function runAll() {
       console.error(`❌ ${industry} 处理失败：`, error.message);
     }
 
-    console.log("⏳ 休息 3 秒，准备处理下一个行业...");
+    console.log("⏳ 等待 3 秒，避免并发限制...");
     await sleep(3000);
   }
-  console.log("\n🎉 所有行业更新完毕！");
+  console.log("\n🎉 全部行业情报处理完毕！");
 }
 
 runAll();
