@@ -27,7 +27,7 @@ async function runAll() {
       console.log(`📡 正在使用 Perplexity 联网检索并蒸馏【${industry}】最新情报...`);
       const searchResponse = await openai.chat.completions.create({
         // 使用 OpenRouter 上的 Perplexity 联网模型
-        model: "perplexity/llama-3.1-sonar-large-128k-online", 
+        model: "perplexity/sonar-pro",
         messages: [{
           role: "user",
           content: `今天是 ${today}。请利用你的联网搜索能力，检索【${industry}】行业过去24小时内的最新突发新闻、Twitter/社交媒体热议动态，以及本周权威分析机构的最新趋势研判。
