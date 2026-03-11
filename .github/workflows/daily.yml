@@ -3,10 +3,10 @@ name: Daily Report Generation
 on:
   schedule:
     - cron: '0 0 * * *' # 每天北京时间早上 8 点自动运行
-  workflow_dispatch: # 允许你在 GitHub 网页上点个按钮手动触发测试
+  workflow_dispatch: # 允许你在 GitHub 网页上手动触发
 
 permissions:
-  contents: write # 允许 GitHub 机器人帮你提交代码
+  contents: write # 必须：允许 GitHub 机器人推送代码
 
 jobs:
   generate:
@@ -14,6 +14,9 @@ jobs:
     steps:
       - name: 检出最新代码
         uses: actions/checkout@v4
+        with:
+          # 获取完整的 Git 历史记录，确保后续 push 时不会因为丢失上下文报错
+          fetch-depth: 0 
 
       - name: 配置 Node.js 环境
         uses: actions/setup-node@v4
@@ -26,13 +29,22 @@ jobs:
       - name: 运行情报抓取与分析脚本
         run: node scripts/generate.mjs
         env:
+          # 既然已经升级为全 OpenRouter (Perplexity + Claude) 架构，去掉了 TAVILY_API_KEY
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
 
       - name: 提交并推送到仓库
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # 将整个 content 目录下的所有变化加入暂存区（包括新建、修改和刚才脚本里的删除旧文件）
           git add content/
-          git commit -m "auto: 更新今日行业情报" || echo "今天的数据没有变化"
-          git push
+          
+          # 严谨判断：检查暂存区是否有真正的变动
+          if git diff --staged --quiet; then
+            echo "🤷‍♂️ 报告内容没有变化，跳过提交和推送"
+          else
+            git commit -m "🤖 自动更新：$(date +'%Y-%m-%d') 行业情报"
+            git push
+            echo "✅ 新报告已成功推送到仓库！"
+          fi
