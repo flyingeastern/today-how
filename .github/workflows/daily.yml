@@ -2,7 +2,7 @@ name: Daily Report Generation
 
 on:
   schedule:
-    - cron: '50 0 * * *' # 每天北京时间早上 8 点自动运行
+    - cron: '0 0 * * *' # 每天北京时间早上 8 点自动运行
   workflow_dispatch: # 允许你在 GitHub 网页上点个按钮手动触发测试
 
 permissions:
