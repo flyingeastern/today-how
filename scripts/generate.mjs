@@ -15,33 +15,36 @@ const openai = new OpenAI({
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function runAll() {
-  // 注意：前端页面 industries 数组也要同步改为 "人工智能"
   const industries = ["贵金属", "人工智能", "电力"];
   
+  // 1. 获取动态的“今天”日期 (例如: 2026-03-11)
+  // 放在循环外面，确保同一次运行生成的所有报告日期完全一致
+  const today = new Date().toISOString().split('T')[0];
+  
   for (const industry of industries) {
-    console.log(`\n🚀 开始处理【${industry}】行业...`);
+    console.log(`\n🚀 开始处理【${industry}】行业... 日期锚点：${today}`);
 
     try {
       // ---------------------------------------------------------
-      // 1. 双引擎搜索：物理隔离 24H 动态与宏观趋势
+      // 1. 双引擎搜索：搜索词强行注入时间戳，逼迫搜索引擎找今天的内容
       // ---------------------------------------------------------
       console.log(`⏳ 正在抓取 [24H最新动态] (侧重社媒与快讯)...`);
-      const search24h = await tvly.search(`${industry} 过去24小时 最新突发新闻 社交媒体热议 Twitter 核心动态`, {
+      const search24h = await tvly.search(`${industry} ${today} 过去24小时 最新突发新闻 社交媒体热议 Twitter 核心动态`, {
         searchDepth: "advanced",
         includeRawContent: true,
-        maxResults: 3
+        maxResults: 4 // 抓取量从3提升到4，给 AI 更多过滤旧闻的空间
       });
       await sleep(1500); // 避开频率限制
 
       console.log(`⏳ 正在抓取 [行业趋势报告] (侧重深度分析)...`);
-      const searchTrends = await tvly.search(`${industry} 近期权威行业深度报告 趋势分析 咨询公司`, {
+      const searchTrends = await tvly.search(`${industry} ${today} 本周最新 权威行业深度报告 趋势分析 咨询公司`, {
         searchDepth: "advanced",
         includeRawContent: true,
         maxResults: 2
       });
 
       // ---------------------------------------------------------
-      // 2. 数据处理与截断 (放宽至 20000 字以适应 Claude)
+      // 2. 数据处理与截断
       // ---------------------------------------------------------
       let data24h = JSON.stringify(search24h.results);
       let dataTrends = JSON.stringify(searchTrends.results);
@@ -51,7 +54,7 @@ async function runAll() {
       if (dataTrends.length > 8000) dataTrends = dataTrends.substring(0, 8000) + '...[截断]';
 
       // ---------------------------------------------------------
-      // 3. AI 深度分析 (包含强效 Prompt 约束)
+      // 3. AI 深度分析 (注入时间锚点与防旧闻机制)
       // ---------------------------------------------------------
       console.log(`🧠 正在生成分析报告 (使用 Claude 3.5 Sonnet)...`);
       const response = await openai.chat.completions.create({
@@ -60,11 +63,15 @@ async function runAll() {
           role: "system",
           content: `你是一位冷酷、专业的行业分析师。请输出一份 Markdown 行业情报。
 
+【时间锚点】：今天是 ${today}。你的所有分析必须基于且仅基于这个时间点！
+
 ⚠️ **输出准则（核心约束）**：
-1. **禁止寒暄**：禁止输出任何引导语、开场白（如“基于信息如下...”）或结束语。
-2. **标题对齐**：必须严格使用二级标题 "## "，严禁使用 "# " 或 "### "。
-3. **内容纯净**：首行必须直接以 "## 一、 ⚡ 24H 最新动态（核心重点）" 开始。
-4. **视觉风格**：用 Emoji 增强模块化，逻辑严密。
+1. **极度时效性**：在写“24H 最新动态”时，【严禁】将 ${today} 之前的旧闻列入。如果提供的数据里没有今天的突发新闻，请直接指出“过去24小时内该行业无重大突发事件”，绝对不要拿旧闻凑数！
+2. **寻找增量**：在写“行业趋势”时，不要重复常识，只提取最新的“增量变量”。
+3. **禁止寒暄**：禁止输出任何引导语、开场白（如“基于信息如下...”）或结束语。
+4. **标题对齐**：必须严格使用二级标题 "## "，严禁使用 "# " 或 "### "。
+5. **内容纯净**：首行必须直接以 "## 一、 ⚡ 24H 最新动态（核心重点）" 开始。
+6. **视觉风格**：用 Emoji 增强模块化，逻辑严密。
 
 必须严格遵守以下结构：
 
@@ -95,26 +102,21 @@ async function runAll() {
       // ---------------------------------------------------------
       let content = response.choices[0].message.content.trim();
 
-      // 自动切除开头可能出现的客套话，定位到首个 ## 
       const firstHeadingIndex = content.indexOf('## 一、');
       if (firstHeadingIndex !== -1) {
         content = content.substring(firstHeadingIndex);
       }
 
-      // 强制统一标题层级为 ##
       content = content.replace(/^(#+)\s*(一、|二、|三、|四、)/gm, '## $2');
-
-      // 剔除代码块外壳
       content = content.replace(/^```markdown\s*/i, '').replace(/```\s*$/i, '').trim();
 
       // ---------------------------------------------------------
-      // 5. 保存文件与清理 (保留最近 7 天)
+      // 5. 保存文件与清理
       // ---------------------------------------------------------
       const dir = `./content/${industry}`;
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       
-      const date = new Date().toISOString().split('T')[0];
-      const filePath = `${dir}/${date}.md`;
+      const filePath = `${dir}/${today}.md`; // 直接使用上面定义好的 today
       fs.writeFileSync(filePath, content);
       console.log(`✅ ${industry} 报告保存成功`);
 
